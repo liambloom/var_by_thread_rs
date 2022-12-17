@@ -1,6 +1,7 @@
-
-
 use std::{collections::HashMap, thread::{ThreadId, self}, cell::{UnsafeCell, Cell}, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, ops::{Deref, DerefMut}, marker::PhantomData};
+
+// TODO: Implement my own HashMap that makes no assumptions about what is being mutated when
+// and can be used without the RwLock
 
 #[cfg(test)]
 mod tests;
@@ -39,16 +40,24 @@ pub struct Ref<'a, T> {
     phantom: PhantomData<Cell<()>>,
 }
 
-impl<'a, T> Deref for Ref<'a, T> {
-    type Target = Option<T>;
-
-    fn deref(&self) -> &'a Self::Target {
-        match self.lock.get(&thread::current().id()) {
-            Some(cell) => unsafe { (cell.get() as *const Option<T>).as_ref::<'a>().unwrap() },
-            None => &None,
-        }
-    }
+macro_rules! deref_impl {
+    ($($t:ident),+) => {
+        $(
+            impl<'a, T> Deref for $t<'a, T> {
+                type Target = Option<T>;
+            
+                fn deref(&self) -> &'a Self::Target {
+                    match self.lock.get(&thread::current().id()) {
+                        Some(cell) => unsafe { cell.get().as_ref::<'a>().unwrap() },
+                        None => &None,
+                    }
+                }
+            }
+        )+
+    };
 }
+
+deref_impl!(Ref, RefMut);
 
 pub struct RefMut<'a, T> {
     lock: RwLockWriteGuard<'a, TheMap<T>>,
@@ -62,30 +71,8 @@ pub struct RefMut<'a, T> {
     phantom: PhantomData<Cell<()>>,
 }
 
-impl<'a, T> Deref for RefMut<'a, T> {
-    type Target = Option<T>;
-
-    fn deref(&self) -> &'a Self::Target {
-        match self.lock.get(&thread::current().id()) {
-            Some(cell) => unsafe { (cell.get() as *const Option<T>).as_ref::<'a>().unwrap() },
-            None => &None
-        }
-    }
-}
-
 impl<'a, T> DerefMut for RefMut<'a, T> {
     fn deref_mut(&mut self) -> &'a mut Self::Target {
         unsafe { self.lock.entry(thread::current().id()).or_insert(UnsafeCell::new(None)).get().as_mut::<'a>().unwrap() }
-
-        // match self.lock.get(&thread::current().id()) {
-        //     Some(cell) => unsafe { 
-        //         let r: &'a mut Option<T> = (cell.get() as *mut Option<T>).as_mut::<'a>().unwrap(); 
-        //     },
-        //     None => {
-        //         // let r: &'a mut Option<T> = &mut None;
-        //     }
-        // };
-
-        // todo!();
     }
 }

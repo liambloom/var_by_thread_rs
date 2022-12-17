@@ -51,7 +51,7 @@ fn multiple_values() {
     *BY_THREAD.borrow_mut() = Some(3);
     assert_eq!(*BY_THREAD.borrow(), Some(3));
 
-    tx.send(Baton);
+    let _ = tx.send(Baton);
 
     let _ = thread.join();
 
