@@ -2,13 +2,22 @@
 
 use std::{collections::HashMap, thread::{ThreadId, self}, cell::{UnsafeCell, Cell}, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, ops::{Deref, DerefMut}, marker::PhantomData};
 
+#[cfg(test)]
+mod tests;
+
 type TheMap<T> = HashMap<ThreadId, UnsafeCell<Option<T>>>;
 
-pub struct ByThread<T> {
+pub struct ByThreadCell<T> {
     value: RwLock<TheMap<T>>,
 }
 
-impl<T> ByThread<T> {
+unsafe impl<T> Sync for ByThreadCell<T> { }
+
+impl<T> ByThreadCell<T> {
+    pub fn new() -> Self {
+        Self { value: RwLock::new(TheMap::new()) }
+    }
+
     pub fn borrow(&self) -> Ref<'_, T> {
         Ref { lock: self.value.read().unwrap(), phantom: PhantomData }
     }
