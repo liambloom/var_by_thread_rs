@@ -1,4 +1,6 @@
-use std::{collections::HashMap, thread::{ThreadId, self}, cell::{UnsafeCell, Cell}, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, ops::{Deref, DerefMut}, marker::PhantomData};
+use std::{collections::HashMap, thread::{ThreadId, self}, cell::{UnsafeCell, Cell}, ops::{Deref, DerefMut}, marker::PhantomData};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
 
 // TODO: Implement my own HashMap that makes no assumptions about what is being mutated when
 // and can be used without the RwLock
@@ -20,11 +22,13 @@ impl<T> ByThreadCell<T> {
     }
 
     pub fn borrow(&self) -> Ref<'_, T> {
-        Ref { lock: self.value.read().unwrap(), phantom: PhantomData }
+        Ref { lock: self.value.read(), phantom: PhantomData }
     }
 
     pub fn borrow_mut(&self) -> RefMut<'_, T> {
-        RefMut { lock: self.value.write().unwrap(), phantom: PhantomData }
+        self.value.write().entry(thread::current().id()).or_insert(UnsafeCell::new(None));
+
+        RefMut { lock: self.value.read(), phantom: PhantomData }
     }
 }
 
@@ -60,7 +64,7 @@ macro_rules! deref_impl {
 deref_impl!(Ref, RefMut);
 
 pub struct RefMut<'a, T> {
-    lock: RwLockWriteGuard<'a, TheMap<T>>,
+    lock: RwLockReadGuard<'a, TheMap<T>>,
 
     // The following note and property are modified from 
     // https://github.com/kinghajj/deque/blob/master/src/lib.rs#L67
@@ -73,6 +77,6 @@ pub struct RefMut<'a, T> {
 
 impl<'a, T> DerefMut for RefMut<'a, T> {
     fn deref_mut(&mut self) -> &'a mut Self::Target {
-        unsafe { self.lock.entry(thread::current().id()).or_insert(UnsafeCell::new(None)).get().as_mut::<'a>().unwrap() }
+        unsafe { self.lock.get(&thread::current().id()).unwrap().get().as_mut::<'a>().unwrap() }
     }
 }
