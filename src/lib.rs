@@ -1,5 +1,5 @@
-use std::{collections::HashMap, thread::{ThreadId, self}, cell::{UnsafeCell, Cell, RefCell, self}, ops::{Deref, DerefMut}, marker::PhantomData, rc::Rc};
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{collections::HashMap, thread::{ThreadId, self}, cell::{UnsafeCell, Cell, RefCell, self}, ops::{Deref, DerefMut}, marker::PhantomData, sync::Arc};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard, Mutex};
 
 
 // TODO: Implement my own HashMap that makes no assumptions about what is being mutated when
@@ -11,19 +11,19 @@ mod tests;
 type TheMap<T> = HashMap<ThreadId, UnsafeCell<(Box<RefCell<()>>, Option<T>)>>;
 
 pub struct ByThreadCell<T> {
-    value: RwLock<TheMap<T>>,
+    value: Arc<RwLock<TheMap<T>>>,
 }
 
 unsafe impl<T> Sync for ByThreadCell<T> { }
 
 impl<T> ByThreadCell<T> {
     pub fn new() -> Self {
-        Self { value: RwLock::new(TheMap::new()) }
+        Self { value: Arc::new(RwLock::new(TheMap::new())) }
     }
 
     pub fn borrow<'a>(&self) -> Ref<'_, T> {
         // let bar: RwLockReadGuard<'a, ()> = self.value.read().get(&thread::current().id()).unwrap().0.read();
-        Ref::new(self.value.read())
+        Ref::new(Arc::clone(&self.value))
     }
 
     pub fn borrow_mut(&self) -> RefMut<'_, T> {
@@ -33,9 +33,11 @@ impl<T> ByThreadCell<T> {
     }
 }
 
+
+
 pub struct Ref<'a, T> {
     value_lock: Option<*mut cell::Ref<'a, ()>>,
-    map_lock: RwLockReadGuard<'a, TheMap<T>>,
+    map_lock: Arc<RwLock<TheMap<T>>>,
 
     // The following note and property are modified from 
     // https://github.com/kinghajj/deque/blob/master/src/lib.rs#L67
@@ -47,10 +49,10 @@ pub struct Ref<'a, T> {
 }
 
 impl<'a, T> Ref<'a, T> {
-    fn new(lock: RwLockReadGuard<'a, TheMap<T>>) -> Self {
-        Ref { 
-            value_lock: lock.get(&thread::current().id()).map(|t_l| Box::into_raw(Box::new(unsafe { (*t_l.get()).0.borrow() }))), 
-            map_lock: lock, 
+    fn new(map_lock: Arc<RwLock<TheMap<T>>>) -> Self {
+        Ref {
+            value_lock: map_lock.read().get(&thread::current().id()).map(|t_l| Box::into_raw(Box::new(unsafe { (*t_l.get()).0.borrow() }))), 
+            map_lock,
             phantom: PhantomData,
         }
     }
@@ -60,7 +62,7 @@ impl<'a, T> Deref for Ref<'a, T> {
     type Target = Option<T>;
 
     fn deref(&self) -> &'a Self::Target {
-        match self.map_lock.get(&thread::current().id()) {
+        match self.map_lock.read().get(&thread::current().id()) {
             Some(cell) => unsafe { &cell.get().as_ref::<'a>().unwrap().1 },
             None => &None,
         }
